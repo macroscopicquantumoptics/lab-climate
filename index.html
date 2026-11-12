@@ -1,0 +1,1566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lab climate</title>
+<meta name="description" content="Temperature and humidity in the lab, measured every 15 minutes.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f5faf7'/%3E%3Cpath d='M4 20 L10 14 L16 17 L22 9 L28 12' fill='none' stroke='%23c0262d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M4 26 L10 23 L16 25 L22 21 L28 22' fill='none' stroke='%233b3fa6' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --font: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    --bg: #ffffff;
+    --text: #1d2b33;
+    --muted: #5b6c74;
+    --line: #d9e3e6;
+    --line-strong: #b6c5ca;
+    --control-bg: #eef3f4;
+    --control-active-bg: #1d2b33;
+    --control-active-text: #ffffff;
+    --paper: #f5faf7;
+    --grid: #d9eae2;
+    --grid-major: #a8cbbd;
+    --temp-ink: #c0262d;
+    --hum-ink: #3b3fa6;
+    --warn-text: #7a4300;
+    --warn-bg: #fff2da;
+    --warn-line: #d9952b;
+    --zone: rgba(217, 149, 43, 0.13);
+    --focus: #3b3fa6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #172125;
+      --text: #e3eced;
+      --muted: #a0b3b9;
+      --line: #2c3c42;
+      --line-strong: #3f545b;
+      --control-bg: #22323a;
+      --control-active-bg: #e3eced;
+      --control-active-text: #172125;
+      --paper: #1c2a2f;
+      --grid: #283b41;
+      --grid-major: #3e5c64;
+      --temp-ink: #ff8f85;
+      --hum-ink: #a9adff;
+      --warn-text: #ffd59a;
+      --warn-bg: #3a2b12;
+      --warn-line: #c08a35;
+      --zone: rgba(224, 162, 58, 0.15);
+      --focus: #a9adff;
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+  .page { max-width: 68rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(1.9rem, 1.4rem + 2vw, 2.6rem);
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+  }
+  .lede { margin: 0.4rem 0 0; color: var(--muted); max-width: 40rem; }
+
+  /* Latest reading */
+  .now { margin-top: 2rem; }
+  .now-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 2.5rem;
+    max-width: 42rem;
+  }
+  .reading { border-top: 4px solid var(--ink); padding-top: 0.6rem; }
+  .reading--temp, #block-temp { --ink: var(--temp-ink); }
+  .reading--hum, #block-hum { --ink: var(--hum-ink); }
+  .reading p { margin: 0; }
+  .reading-name { font-weight: 700; }
+  .reading-value {
+    margin-top: 0.15rem !important;
+    font-size: clamp(2.6rem, 2rem + 3vw, 3.75rem);
+    font-weight: 700;
+    line-height: 1.05;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .reading-unit { font-size: 0.45em; font-weight: 400; margin-left: 0.2em; color: var(--muted); letter-spacing: 0; }
+  .reading-note { margin-top: 0.45rem !important; color: var(--muted); font-size: 0.95rem; }
+  .reading.is-out .reading-note { color: var(--warn-text); font-weight: 700; }
+  .now-status { margin: 1rem 0 0; color: var(--muted); }
+
+  .notices { margin-top: 1rem; display: grid; gap: 0.5rem; max-width: 46rem; }
+  .notices:empty { display: none; }
+  .notice {
+    margin: 0;
+    padding: 0.65rem 0.9rem;
+    border-left: 4px solid var(--warn-line);
+    border-radius: 0 6px 6px 0;
+    background: var(--warn-bg);
+    color: var(--warn-text);
+  }
+  .notice .btn { margin-left: 0.5rem; }
+
+  /* Choosing what to show */
+  .explore { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--line); }
+  .controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem 1.75rem; }
+  .control { display: flex; flex-direction: column; gap: 0.35rem; }
+  .control-label { font-weight: 700; font-size: 0.95rem; }
+  .segmented { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .segmented button {
+    font: inherit;
+    border: 1px solid transparent;
+    background: var(--control-bg);
+    color: var(--text);
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .segmented button:hover { border-color: var(--line-strong); }
+  .segmented button[aria-pressed="true"] { background: var(--control-active-bg); color: var(--control-active-text); }
+  .custom-dates { flex-direction: row; gap: 0.75rem; }
+  .custom-dates[hidden] { display: none; }
+  .custom-dates label { display: flex; flex-direction: column; gap: 0.35rem; font-weight: 700; font-size: 0.95rem; }
+  select, input {
+    font: inherit;
+    font-weight: 400;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 0.4rem 0.55rem;
+  }
+  .summary-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    margin-top: 1.25rem;
+  }
+  .summary { margin: 0; color: var(--muted); max-width: 40rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .btn {
+    font: inherit;
+    border: 1px solid var(--line-strong);
+    background: var(--bg);
+    color: var(--text);
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .btn:hover:not(:disabled) { background: var(--control-bg); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .action-status { min-height: 1.5em; margin: 0.5rem 0 0; color: var(--muted); font-size: 0.95rem; }
+
+  /* Charts */
+  .measure { margin-top: 1.75rem; }
+  .measure h2 {
+    margin: 0;
+    font-size: 1.4rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .measure h2::before {
+    content: "";
+    width: 1.5rem;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--ink);
+  }
+  .stats { display: flex; flex-wrap: wrap; gap: 0.5rem 2.25rem; margin: 0.6rem 0 0.9rem; }
+  .stats dt { color: var(--muted); font-size: 0.9rem; }
+  .stats dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stats dd.is-warn { color: var(--warn-text); }
+  .stats .when { display: block; font-weight: 400; color: var(--muted); font-size: 0.9rem; }
+  .chart-wrap { position: relative; height: 18rem; }
+  .is-loading .chart-wrap canvas { opacity: 0.35; }
+  .chart-empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .chart-empty[hidden] { display: none; }
+
+  /* Limits */
+  .limits { margin-top: 2.75rem; padding-top: 1.5rem; border-top: 1px solid var(--line); }
+  .limits h2 { margin: 0; font-size: 1.4rem; }
+  .hint { color: var(--muted); max-width: 44rem; margin: 0.4rem 0 1rem; }
+  .limit-grid { display: flex; flex-wrap: wrap; gap: 1rem 2.75rem; }
+  fieldset { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; }
+  legend { font-weight: 700; padding: 0; margin-bottom: 0.35rem; }
+  fieldset label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; color: var(--muted); }
+  fieldset input { width: 6.5rem; }
+  .field-error { color: var(--warn-text); font-weight: 700; margin: 0.75rem 0 0; }
+  .field-error[hidden] { display: none; }
+  .limits .btn { margin-top: 1rem; }
+
+  .foot {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .foot p { margin: 0 0 0.4rem; max-width: 46rem; }
+  .foot a { color: inherit; }
+
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .visually-hidden {
+    position: absolute !important;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  @media (max-width: 40rem) {
+    .page { padding-top: 1.25rem; }
+    .chart-wrap { height: 15rem; }
+    .now-grid { gap: 1rem 1.25rem; }
+    .summary-row { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1 id="title">Lab climate</h1>
+    <p class="lede" id="subtitle">Temperature and humidity in the lab, measured every 15 minutes.</p>
+  </header>
+
+  <section class="now" aria-labelledby="now-heading">
+    <h2 id="now-heading" class="visually-hidden">Latest reading</h2>
+    <div class="now-grid">
+      <div class="reading reading--temp">
+        <p class="reading-name">Temperature</p>
+        <p class="reading-value"><span id="now-temp">–</span><span class="reading-unit">°C</span></p>
+        <p class="reading-note" id="now-temp-note"></p>
+      </div>
+      <div class="reading reading--hum">
+        <p class="reading-name">Humidity</p>
+        <p class="reading-value"><span id="now-hum">–</span><span class="reading-unit">%</span></p>
+        <p class="reading-note" id="now-hum-note"></p>
+      </div>
+    </div>
+    <p class="now-status" id="now-status">Loading the latest reading…</p>
+    <div class="notices" id="notices" role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="explore" aria-label="Choose what the charts show">
+    <div class="controls">
+      <div class="control">
+        <span class="control-label" id="range-label">Time range</span>
+        <div class="segmented" role="group" aria-labelledby="range-label" id="range-buttons"></div>
+      </div>
+      <div class="control custom-dates" id="custom-dates" hidden>
+        <label>From <input type="date" id="custom-from"></label>
+        <label>To <input type="date" id="custom-to"></label>
+      </div>
+      <div class="control">
+        <label class="control-label" for="step">One point every</label>
+        <select id="step"></select>
+      </div>
+    </div>
+    <div class="summary-row">
+      <p class="summary" id="summary">Loading readings…</p>
+      <div class="actions">
+        <button type="button" class="btn" id="dl-xlsx" disabled>Download Excel</button>
+        <button type="button" class="btn" id="dl-csv" disabled>Download CSV</button>
+        <button type="button" class="btn" id="copy-link">Copy link to this view</button>
+      </div>
+    </div>
+    <p class="action-status" id="action-status" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="measure" id="block-temp" aria-labelledby="h-temp">
+    <h2 id="h-temp">Temperature</h2>
+    <dl class="stats" id="stats-temp"></dl>
+    <div class="chart-wrap">
+      <canvas id="chart-temp" role="img" aria-label="Chart of the temperature over the chosen time range"></canvas>
+      <p class="chart-empty" id="empty-temp" hidden>No readings in this period.</p>
+    </div>
+  </section>
+
+  <section class="measure" id="block-hum" aria-labelledby="h-hum">
+    <h2 id="h-hum">Humidity</h2>
+    <dl class="stats" id="stats-hum"></dl>
+    <div class="chart-wrap">
+      <canvas id="chart-hum" role="img" aria-label="Chart of the humidity over the chosen time range"></canvas>
+      <p class="chart-empty" id="empty-hum" hidden>No readings in this period.</p>
+    </div>
+  </section>
+
+  <section class="limits" aria-labelledby="h-limits">
+    <h2 id="h-limits">Your limits</h2>
+    <p class="hint">Readings outside these limits are marked on the charts and announced at the top of the page. They are saved in this browser only, so everyone can choose their own.</p>
+    <div class="limit-grid">
+      <fieldset>
+        <legend>Temperature, °C</legend>
+        <label>Lowest <input type="number" id="lim-tempMin" step="0.5" inputmode="decimal"></label>
+        <label>Highest <input type="number" id="lim-tempMax" step="0.5" inputmode="decimal"></label>
+      </fieldset>
+      <fieldset>
+        <legend>Humidity, %</legend>
+        <label>Lowest <input type="number" id="lim-humMin" step="1" inputmode="decimal"></label>
+        <label>Highest <input type="number" id="lim-humMax" step="1" inputmode="decimal"></label>
+      </fieldset>
+    </div>
+    <p class="field-error" id="limits-error" hidden></p>
+    <button type="button" class="btn" id="lim-reset">Use the lab’s default limits</button>
+  </section>
+
+  <footer class="foot">
+    <p id="foot-source"></p>
+    <p>Your limits and your choice of time range are saved in this browser only.</p>
+  </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js" integrity="sha384-cVMg8E3QFwTvGCDuK+ET4PD341jF3W8nO1auiXfuZNQkzbUUiBGLsIQUE+b1mxws" crossorigin="anonymous"></script>
+<script>
+/* =====================================================================
+   SETTINGS
+   These are the only lines you may need to change.
+   ===================================================================== */
+const CONFIG = {
+  channelId: 3573817,          // your ThingSpeak channel number
+  readApiKey: "",              // leave empty while the channel is public
+  title: "Lab climate",
+  subtitle: "Temperature and humidity in the lab, measured every 15 minutes.",
+  temperatureField: 1,         // the ThingSpeak field that holds the temperature
+  humidityField: 2,            // the ThingSpeak field that holds the humidity
+  minutesBetweenReadings: 15,  // how often the lab PC uploads a reading
+  defaultRange: "14d",         // what visitors see first: 1d, 3d, 7d, 14d, 30d, 90d or 365d
+  defaultLimits: { tempMin: 18, tempMax: 26, humMin: 30, humMax: 60 }
+};
+/* ===================================================================== */
+
+(function () {
+  "use strict";
+
+  const API = "https://api.thingspeak.com";
+  const MIN = 60 * 1000, HOUR = 60 * MIN, DAY = 24 * HOUR;
+  const PAD = 14 * HOUR;            // extra time asked for on each side, so time zones never cut data off
+  const CHUNK = 60 * DAY;           // the longest time span asked for in one request
+  const MAX_PER_REQUEST = 8000;     // ThingSpeak sends at most this many readings per request
+  const MAX_POINTS = 3000;          // the most points drawn in one chart
+
+  const RANGES = [
+    { id: "1d", label: "24 hours", days: 1 },
+    { id: "3d", label: "3 days", days: 3 },
+    { id: "7d", label: "7 days", days: 7 },
+    { id: "14d", label: "14 days", days: 14 },
+    { id: "30d", label: "30 days", days: 30 },
+    { id: "90d", label: "90 days", days: 90 },
+    { id: "365d", label: "1 year", days: 365 },
+    { id: "custom", label: "Custom dates" }
+  ];
+  const STEPS = [
+    { min: 15, label: "15 minutes", short: "15min" },
+    { min: 30, label: "30 minutes", short: "30min" },
+    { min: 60, label: "1 hour", short: "1h" },
+    { min: 240, label: "4 hours", short: "4h" },
+    { min: 720, label: "12 hours", short: "12h" },
+    { min: 1440, label: "1 day", short: "1day" }
+  ];
+  const MEASURES = [
+    { key: "temp", name: "Temperature", unit: "°C", ink: "--temp-ink", limMin: "tempMin", limMax: "tempMax", clamp: null },
+    { key: "hum", name: "Humidity", unit: "%", ink: "--hum-ink", limMin: "humMin", limMax: "humMax", clamp: [0, 100] }
+  ];
+
+  const el = (id) => document.getElementById(id);
+
+  /* ---------- Formatting ---------- */
+  const fmt = {
+    time: new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }),
+    dayTime: new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
+    day: new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }),
+    dayShort: new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" })
+  };
+  function num(v, digits) {
+    const d = digits === undefined ? 1 : digits;
+    return v.toLocaleString("en-GB", { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function numLimit(v) { return Number.isInteger(v) ? String(v) : num(v); }
+  function withUnit(v, unit) { return num(v) + "\u00A0" + unit; }
+  function limitText(v, unit) { return numLimit(v) + "\u00A0" + unit; }
+  function count(n) { return n.toLocaleString("en-GB"); }
+  function ago(ms) {
+    const m = Math.round(ms / MIN);
+    if (m < 1) return "just now";
+    if (m < 60) return m === 1 ? "1 minute ago" : m + " minutes ago";
+    const h = Math.round(ms / HOUR);
+    if (h < 48) return h === 1 ? "1 hour ago" : h + " hours ago";
+    return Math.round(ms / DAY) + " days ago";
+  }
+  function duration(ms) {
+    const m = Math.round(ms / MIN);
+    if (m < 90) return m + " minutes";
+    const h = Math.round(ms / HOUR);
+    if (h < 48) return h + " hours";
+    return Math.round(ms / DAY) + " days";
+  }
+  function sameDay(a, b) { return a.toDateString() === b.toDateString(); }
+  function whenText(t) {
+    const d = new Date(t), now = new Date(), yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    if (sameDay(d, now)) return "today at " + fmt.time.format(d);
+    if (sameDay(d, yesterday)) return "yesterday at " + fmt.time.format(d);
+    return "on " + fmt.dayShort.format(d) + " at " + fmt.time.format(d);
+  }
+  function pad2(n) { return String(n).padStart(2, "0"); }
+  function isoDate(ms) {
+    const d = new Date(ms);
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+  function isoLocal(ms) {
+    const d = new Date(ms);
+    return isoDate(ms) + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+  }
+  function isIsoDate(s) { return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(localMidnight(s)); }
+  function localMidnight(s) {
+    const p = s.split("-").map(Number);
+    return new Date(p[0], p[1] - 1, p[2]).getTime();
+  }
+  function addDays(ms, n) { const d = new Date(ms); d.setDate(d.getDate() + n); return d.getTime(); }
+
+  /* ---------- Saved choices ---------- */
+  const store = {
+    get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { window.localStorage.setItem(k, v); } catch (e) { /* not available */ } }
+  };
+  const LIMITS_KEY = "labclimate:" + CONFIG.channelId + ":limits";
+  const VIEW_KEY = "labclimate:" + CONFIG.channelId + ":view";
+
+  function validLimits(l) {
+    return !!l && ["tempMin", "tempMax", "humMin", "humMax"].every((k) => typeof l[k] === "number" && isFinite(l[k])) &&
+      l.tempMin < l.tempMax && l.humMin < l.humMax &&
+      l.tempMin >= -50 && l.tempMax <= 100 && l.humMin >= 0 && l.humMax <= 100;
+  }
+  function loadLimits() {
+    try {
+      const saved = JSON.parse(store.get(LIMITS_KEY) || "null");
+      if (validLimits(saved)) return saved;
+    } catch (e) { /* ignore */ }
+    return Object.assign({}, CONFIG.defaultLimits);
+  }
+  let limits = loadLimits();
+  function limFor(m) { return { min: limits[m.limMin], max: limits[m.limMax] }; }
+
+  /* ---------- What is shown ---------- */
+  const state = { range: CONFIG.defaultRange, from: null, to: null, step: null };
+
+  function readView(text) {
+    const p = new URLSearchParams(text || "");
+    const r = p.get("range");
+    if (!r || !RANGES.some((x) => x.id === r)) return false;
+    if (r === "custom") {
+      const f = p.get("from"), t = p.get("to");
+      if (!isIsoDate(f) || !isIsoDate(t) || f > t) return false;
+      state.from = f; state.to = t;
+    }
+    state.range = r;
+    const s = parseInt(p.get("step"), 10);
+    state.step = STEPS.some((x) => x.min === s) ? s : null;
+    return true;
+  }
+  function viewText() {
+    const p = new URLSearchParams();
+    p.set("range", state.range);
+    if (state.range === "custom") { p.set("from", state.from); p.set("to", state.to); }
+    p.set("step", String(state.step));
+    return p.toString();
+  }
+  function saveView() {
+    const text = viewText();
+    try { history.replaceState(null, "", "#" + text); } catch (e) { /* ignore */ }
+    store.set(VIEW_KEY, text);
+  }
+
+  function currentWindow() {
+    const now = Date.now();
+    if (state.range === "custom") {
+      const from = localMidnight(state.from);
+      const to = Math.min(addDays(localMidnight(state.to), 1), now);
+      return to > from ? { from, to } : null;
+    }
+    const r = RANGES.find((x) => x.id === state.range) || RANGES[3];
+    return { from: now - r.days * DAY, to: now };
+  }
+  function pointsFor(w, stepMin) { return (w.to - w.from) / (stepMin * MIN); }
+  function defaultStep(w) {
+    const days = (w.to - w.from) / DAY;
+    if (days <= 1.01) return 15;
+    if (days <= 3.01) return 30;
+    if (days <= 31) return 60;
+    if (days <= 120) return 240;
+    if (days <= 240) return 720;
+    return 1440;
+  }
+  function fixStep(w) {
+    const coarsest = STEPS[STEPS.length - 1].min;
+    if (!state.step || (state.step !== coarsest && pointsFor(w, state.step) > MAX_POINTS)) state.step = defaultStep(w);
+  }
+
+  /* ---------- Reading data from ThingSpeak ---------- */
+  class PrivateChannelError extends Error {}
+
+  function feedsUrl(params) {
+    const q = Object.keys(params).map((k) => k + "=" + encodeURIComponent(params[k]));
+    if (CONFIG.readApiKey) q.push("api_key=" + encodeURIComponent(CONFIG.readApiKey));
+    return API + "/channels/" + encodeURIComponent(CONFIG.channelId) + "/feeds.json?" + q.join("&");
+  }
+  async function getJson(url) {
+    const res = await fetch(url, { cache: "no-store" });
+    const text = await res.text();
+    if (text.trim() === "-1" || res.status === 401 || res.status === 403) throw new PrivateChannelError("private");
+    if (!res.ok) throw new Error("ThingSpeak answered with status " + res.status);
+    return JSON.parse(text);
+  }
+  function utcParam(ms) {
+    const d = new Date(ms);
+    return d.getUTCFullYear() + "-" + pad2(d.getUTCMonth() + 1) + "-" + pad2(d.getUTCDate()) + " " +
+      pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes()) + ":" + pad2(d.getUTCSeconds());
+  }
+  function toNumber(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = parseFloat(v);
+    return isFinite(n) ? n : null;
+  }
+  function parseFeed(f) {
+    const t = Date.parse(f.created_at);
+    if (!isFinite(t)) return null;
+    const r = {
+      id: f.entry_id,
+      t: t,
+      temp: toNumber(f["field" + CONFIG.temperatureField]),
+      hum: toNumber(f["field" + CONFIG.humidityField])
+    };
+    return r.temp === null && r.hum === null ? null : r;
+  }
+
+  async function fetchChunk(from, to, depth) {
+    const data = await getJson(feedsUrl({ start: utcParam(from - PAD), end: utcParam(to + PAD), results: MAX_PER_REQUEST }));
+    const feeds = data && Array.isArray(data.feeds) ? data.feeds : [];
+    if (feeds.length >= MAX_PER_REQUEST && depth < 10 && to - from > HOUR) {
+      const mid = from + Math.floor((to - from) / 2);
+      const first = await fetchChunk(from, mid, depth + 1);
+      const second = await fetchChunk(mid, to, depth + 1);
+      return first.concat(second);
+    }
+    const out = [];
+    for (const f of feeds) { const r = parseFeed(f); if (r) out.push(r); }
+    return out;
+  }
+
+  async function fetchRange(from, to, onProgress) {
+    const chunks = [];
+    for (let a = from; a < to; a += CHUNK) chunks.push([a, Math.min(a + CHUNK, to)]);
+    let done = 0;
+    const found = [];
+    async function worker() {
+      while (chunks.length) {
+        const c = chunks.shift();
+        const part = await fetchChunk(c[0], c[1], 0);
+        for (const r of part) found.push(r);
+        done++;
+        if (onProgress) onProgress(done, total);
+      }
+    }
+    const total = chunks.length;
+    const workers = [];
+    for (let i = 0; i < Math.min(3, total); i++) workers.push(worker());
+    await Promise.all(workers);
+    return found;
+  }
+
+  const cache = { from: null, to: null, byId: new Map(), list: [] };
+
+  async function ensureData(from, to, onProgress) {
+    let segments, fresh;
+    if (cache.from === null || to <= cache.from || from >= cache.to) {
+      segments = [[from, to]];
+      fresh = true;
+    } else {
+      segments = [];
+      if (from < cache.from) segments.push([from, cache.from]);
+      if (to > cache.to + MIN) segments.push([cache.to, to]);
+      fresh = false;
+    }
+    if (!segments.length) { cache.list = cache.list || []; return; }
+    const found = [];
+    for (const s of segments) {
+      const part = await fetchRange(s[0], s[1], onProgress);
+      for (const r of part) found.push(r);
+    }
+    if (fresh) { cache.byId.clear(); cache.from = from; cache.to = to; }
+    for (const r of found) cache.byId.set(r.id, r);
+    cache.from = Math.min(cache.from, from);
+    cache.to = Math.max(cache.to, to);
+    cache.list = Array.from(cache.byId.values()).sort((a, b) => a.t - b.t);
+  }
+  let dataQueue = Promise.resolve();
+  function ensureDataInTurn(from, to, onProgress) {
+    const job = dataQueue.then(() => ensureData(from, to, onProgress));
+    dataQueue = job.catch(() => {});
+    return job;
+  }
+
+  function readingsBetween(from, to) {
+    const list = cache.list;
+    let lo = 0, hi = list.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (list[mid].t < from) lo = mid + 1; else hi = mid; }
+    const out = [];
+    for (let i = lo; i < list.length && list[i].t <= to; i++) out.push(list[i]);
+    return out;
+  }
+
+  /* ---------- Turning readings into points ---------- */
+  function floorTo(t, stepMin) {
+    const d = new Date(t);
+    if (stepMin < 60) {
+      d.setSeconds(0, 0);
+      d.setMinutes(Math.floor(d.getMinutes() / stepMin) * stepMin);
+    } else if (stepMin < 1440) {
+      const h = stepMin / 60;
+      d.setMinutes(0, 0, 0);
+      d.setHours(Math.floor(d.getHours() / h) * h);
+    } else {
+      d.setHours(0, 0, 0, 0);
+    }
+    return d.getTime();
+  }
+  function nextFrom(t, stepMin) {
+    let n;
+    if (stepMin < 60) n = t + stepMin * MIN;
+    else if (stepMin < 1440) { const d = new Date(t); d.setHours(d.getHours() + stepMin / 60); n = d.getTime(); }
+    else { const d = new Date(t); d.setDate(d.getDate() + 1); n = d.getTime(); }
+    return n > t ? n : t + stepMin * MIN;
+  }
+  function newTally() { return { n: 0, sum: 0, min: null, max: null, avg: null }; }
+  function tally(a, v) {
+    if (v === null) return;
+    a.n++; a.sum += v;
+    if (a.min === null || v < a.min) a.min = v;
+    if (a.max === null || v > a.max) a.max = v;
+  }
+  function makeBins(readings, from, to, stepMin) {
+    const bins = [];
+    let i = 0, guard = 0;
+    for (let b = floorTo(from, stepMin); b < to && guard < 100000; guard++) {
+      const e = nextFrom(b, stepMin);
+      const bin = { t: b, end: e, n: 0, temp: newTally(), hum: newTally() };
+      while (i < readings.length && readings[i].t < e) {
+        const r = readings[i];
+        if (r.t >= b) { bin.n++; tally(bin.temp, r.temp); tally(bin.hum, r.hum); }
+        i++;
+      }
+      for (const m of MEASURES) { const a = bin[m.key]; a.avg = a.n ? a.sum / a.n : null; }
+      bins.push(bin);
+      b = e;
+    }
+    return bins;
+  }
+  function summarize(readings, m, lim) {
+    let n = 0, sum = 0, outside = 0, low = null, high = null;
+    for (const r of readings) {
+      const v = r[m.key];
+      if (v === null) continue;
+      n++; sum += v;
+      if (!low || v < low.v) low = { v: v, t: r.t };
+      if (!high || v > high.v) high = { v: v, t: r.t };
+      if (v < lim.min || v > lim.max) outside++;
+    }
+    return { n: n, avg: n ? sum / n : null, low: low, high: high, outside: outside };
+  }
+  function findGaps(readings) {
+    const limit = CONFIG.minutesBetweenReadings * MIN * 2.5;
+    let n = 0, longest = null;
+    for (let i = 1; i < readings.length; i++) {
+      const d = readings[i].t - readings[i - 1].t;
+      if (d > limit) {
+        n++;
+        if (!longest || d > longest.d) longest = { d: d, from: readings[i - 1].t };
+      }
+    }
+    return { n: n, longest: longest };
+  }
+
+  /* ---------- Charts ---------- */
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function palette() {
+    return {
+      text: cssVar("--text"), muted: cssVar("--muted"), paper: cssVar("--paper"),
+      grid: cssVar("--grid"), gridMajor: cssVar("--grid-major"), zone: cssVar("--zone"),
+      warnLine: cssVar("--warn-line"), bg: cssVar("--bg"),
+      temp: cssVar("--temp-ink"), hum: cssVar("--hum-ink")
+    };
+  }
+  function withAlpha(color, a) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(color);
+    if (!m) return color;
+    const n = parseInt(m[1], 16);
+    return "rgba(" + ((n >> 16) & 255) + ", " + ((n >> 8) & 255) + ", " + (n & 255) + ", " + a + ")";
+  }
+  const FONT = getComputedStyle(document.body).fontFamily;
+
+  // Draws the chart paper, the shaded zones outside the limits and the dashed limit lines
+  const paperPlugin = {
+    id: "labPaper",
+    beforeDraw(chart) {
+      const a = chart.chartArea, y = chart.scales.y;
+      if (!a || !y) return;
+      const p = palette(), ctx = chart.ctx, lim = chart.$limits;
+      ctx.save();
+      ctx.fillStyle = p.paper;
+      ctx.fillRect(a.left, a.top, a.right - a.left, a.bottom - a.top);
+      if (lim) {
+        ctx.fillStyle = p.zone;
+        const top = Math.max(a.top, Math.min(a.bottom, y.getPixelForValue(lim.max)));
+        if (top > a.top) ctx.fillRect(a.left, a.top, a.right - a.left, top - a.top);
+        const bottom = Math.max(a.top, Math.min(a.bottom, y.getPixelForValue(lim.min)));
+        if (bottom < a.bottom) ctx.fillRect(a.left, bottom, a.right - a.left, a.bottom - bottom);
+      }
+      ctx.restore();
+    },
+    beforeDatasetsDraw(chart) {
+      const a = chart.chartArea, y = chart.scales.y, lim = chart.$limits, m = chart.$measure;
+      if (!a || !y || !lim || !m) return;
+      const p = palette(), ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = p.warnLine;
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([6, 4]);
+      ctx.fillStyle = p.muted;
+      ctx.font = "12px " + FONT;
+      ctx.textAlign = "right";
+      const lines = [
+        { v: lim.max, text: "Upper limit " + limitText(lim.max, m.unit), above: true },
+        { v: lim.min, text: "Lower limit " + limitText(lim.min, m.unit), above: false }
+      ];
+      for (const line of lines) {
+        const py = y.getPixelForValue(line.v);
+        if (py < a.top - 0.5 || py > a.bottom + 0.5) continue;
+        ctx.beginPath();
+        ctx.moveTo(a.left, py);
+        ctx.lineTo(a.right, py);
+        ctx.stroke();
+        const ty = line.above ? py - 5 : py + 15;
+        if (ty > a.top + 10 && ty < a.bottom - 2) ctx.fillText(line.text, a.right - 6, ty);
+      }
+      ctx.restore();
+    }
+  };
+
+  const charts = {};
+  let currentStep = 60;
+
+  function periodLabel(t) {
+    if (currentStep >= 1440) return fmt.day.format(t);
+    if (currentStep <= CONFIG.minutesBetweenReadings) return fmt.dayTime.format(t);
+    return fmt.dayTime.format(t) + "–" + fmt.time.format(nextFrom(t, currentStep));
+  }
+
+  function makeChart(m) {
+    const radius = (ctx) => {
+      const flags = ctx.chart.$flags || [], data = ctx.dataset.data, i = ctx.dataIndex;
+      if (flags[i]) return 3.5;
+      const prev = data[i - 1], next = data[i + 1];
+      const lonely = (!prev || prev.y === null) && (!next || next.y === null);
+      return lonely && data[i] && data[i].y !== null ? 2.5 : 0;
+    };
+    return new Chart(el("chart-" + m.key), {
+      type: "line",
+      data: {
+        datasets: [
+          { label: "Highest", data: [], borderWidth: 0, pointRadius: 0, pointHitRadius: 0, fill: "+1", spanGaps: false },
+          { label: "Lowest", data: [], borderWidth: 0, pointRadius: 0, pointHitRadius: 0, fill: false, spanGaps: false },
+          {
+            label: m.name, data: [], borderWidth: 2, tension: 0, fill: false, spanGaps: false,
+            pointRadius: radius, pointHoverRadius: 4.5, pointBorderWidth: 1.5
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        parsing: false,
+        normalized: true,
+        interaction: { mode: "index", intersect: false },
+        layout: { padding: { right: 4 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            filter: (item) => item.datasetIndex === 2 && item.parsed.y !== null && !isNaN(item.parsed.y),
+            displayColors: false,
+            callbacks: {
+              title: (items) => items.length ? periodLabel(items[0].parsed.x) : "",
+              label: (item) => {
+                const bin = (item.chart.$bins || [])[item.dataIndex];
+                const s = bin && bin[m.key];
+                if (!s || s.avg === null) return "";
+                return s.n > 1 ? "Average " + withUnit(s.avg, m.unit) : withUnit(s.avg, m.unit);
+              },
+              afterLabel: (item) => {
+                const bin = (item.chart.$bins || [])[item.dataIndex];
+                const s = bin && bin[m.key];
+                if (!s || s.n < 2) return "";
+                return "From " + num(s.min) + " to " + withUnit(s.max, m.unit) + ", " + s.n + " readings";
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            type: "time",
+            time: {
+              displayFormats: {
+                minute: "HH:mm", hour: "HH:mm", day: "d MMM", week: "d MMM",
+                month: "MMM yyyy", quarter: "MMM yyyy", year: "yyyy"
+              }
+            },
+            ticks: { maxRotation: 0, autoSkipPadding: 18, major: { enabled: true } },
+            border: { display: false }
+          },
+          y: {
+            ticks: { maxTicksLimit: 9 },
+            border: { display: false }
+          }
+        }
+      },
+      plugins: [paperPlugin]
+    });
+  }
+
+  function yRange(bins, m, lim) {
+    let lo = Infinity, hi = -Infinity;
+    for (const b of bins) {
+      const s = b[m.key];
+      if (s.n) { lo = Math.min(lo, s.min); hi = Math.max(hi, s.max); }
+    }
+    lo = Math.min(isFinite(lo) ? lo : lim.min, lim.min);
+    hi = Math.max(isFinite(hi) ? hi : lim.max, lim.max);
+    const padding = Math.max((hi - lo) * 0.06, 0.3);
+    lo -= padding;
+    hi += padding;
+    // Round the ends to tidy numbers, so the axis labels are evenly spaced
+    const rough = (hi - lo) / 5;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rough)));
+    let step = magnitude;
+    for (const f of [1, 2, 2.5, 5, 10]) { if (f * magnitude >= rough) { step = f * magnitude; break; } }
+    let min = Math.floor(lo / step) * step, max = Math.ceil(hi / step) * step;
+    if (m.clamp) { min = Math.max(m.clamp[0], min); max = Math.min(m.clamp[1], max); }
+    return { min: min, max: max, step: step };
+  }
+
+  function drawChart(m, bins, from, to, stepMin) {
+    const chart = charts[m.key];
+    if (!chart) return;
+    const p = palette(), ink = p[m.key], lim = limFor(m);
+    const showBand = stepMin > CONFIG.minutesBetweenReadings;
+    const avg = [], high = [], low = [], flags = [];
+    for (const b of bins) {
+      const s = b[m.key];
+      const has = s.n > 0;
+      avg.push({ x: b.t, y: has ? s.avg : null });
+      high.push({ x: b.t, y: has ? s.max : null });
+      low.push({ x: b.t, y: has ? s.min : null });
+      flags.push(has && (s.min < lim.min || s.max > lim.max));
+    }
+    chart.$bins = bins;
+    chart.$flags = flags;
+    chart.$limits = lim;
+    chart.$measure = m;
+
+    const ds = chart.data.datasets;
+    ds[0].data = showBand ? high : [];
+    ds[1].data = showBand ? low : [];
+    ds[2].data = avg;
+    ds[0].backgroundColor = withAlpha(ink, 0.18);
+    ds[0].borderColor = "transparent";
+    ds[1].borderColor = "transparent";
+    ds[2].borderColor = ink;
+    ds[2].pointBackgroundColor = p.warnLine;
+    ds[2].pointBorderColor = ink;
+    ds[2].pointHoverBackgroundColor = ink;
+
+    const range = yRange(bins, m, lim);
+    const o = chart.options;
+    o.scales.x.min = from;
+    o.scales.x.max = to;
+    o.scales.y.min = range.min;
+    o.scales.y.max = range.max;
+    o.scales.y.ticks.stepSize = range.step;
+    o.scales.x.ticks.color = p.muted;
+    o.scales.y.ticks.color = p.muted;
+    o.scales.x.ticks.font = (ctx) => ({ family: FONT, size: 12, weight: ctx.tick && ctx.tick.major ? "700" : "400" });
+    o.scales.y.ticks.font = { family: FONT, size: 12 };
+    o.scales.y.ticks.callback = (v) => numLimit(Math.round(v * 100) / 100) + "\u00A0" + m.unit;
+    o.scales.x.grid = { color: (ctx) => (ctx.tick && ctx.tick.major ? p.gridMajor : p.grid), lineWidth: 1 };
+    o.scales.y.grid = { color: p.grid, lineWidth: 1 };
+    o.plugins.tooltip.titleFont = { family: FONT, size: 13, weight: "700" };
+    o.plugins.tooltip.bodyFont = { family: FONT, size: 13 };
+    chart.update("none");
+
+    el("empty-" + m.key).hidden = bins.some((b) => b[m.key].n > 0);
+  }
+
+  /* ---------- Page state ---------- */
+  let latest = null, latestError = null, loadError = null, current = null;
+  let loadSeq = 0, loading = false, lastLatestAt = 0, lastDataAt = 0, latestTried = false;
+
+  function setLoading(on, text) {
+    loading = on;
+    document.body.classList.toggle("is-loading", on);
+    if (on && text) el("summary").textContent = text;
+    updateDownloadButtons();
+  }
+  function updateDownloadButtons() {
+    const ok = !loading && current && current.readings.length > 0;
+    el("dl-xlsx").disabled = !ok;
+    el("dl-csv").disabled = !ok;
+  }
+
+  async function load(options) {
+    const quiet = options && options.quiet;
+    const w = currentWindow();
+    if (!w) { say("The chosen dates are in the future. Choose an earlier date."); return; }
+    fixStep(w);
+    const seq = ++loadSeq;
+    if (!quiet) setLoading(true, "Loading readings…");
+    try {
+      await ensureDataInTurn(w.from, w.to, (done, total) => {
+        if (!quiet && seq === loadSeq && total > 1 && done < total) {
+          el("summary").textContent = "Loading readings, part " + (done + 1) + " of " + total + "…";
+        }
+      });
+      if (seq !== loadSeq) return;
+      loadError = null;
+      lastDataAt = Date.now();
+      const readings = readingsBetween(w.from, w.to);
+      current = { from: w.from, to: w.to, step: state.step, readings: readings, bins: makeBins(readings, w.from, w.to, state.step) };
+      const last = readings[readings.length - 1];
+      if (last && (!latest || last.t > latest.t)) latest = last;
+    } catch (e) {
+      if (seq !== loadSeq) return;
+      loadError = e;
+      if (!quiet) current = null;
+    } finally {
+      if (seq === loadSeq) setLoading(false);
+    }
+    renderNow();
+    renderData();
+  }
+
+  async function loadLatest() {
+    lastLatestAt = Date.now();
+    try {
+      const data = await getJson(feedsUrl({ results: 1 }));
+      const feeds = data && Array.isArray(data.feeds) ? data.feeds : [];
+      const r = feeds.length ? parseFeed(feeds[feeds.length - 1]) : null;
+      if (r && (!latest || r.t >= latest.t)) latest = r;
+      latestError = null;
+    } catch (e) {
+      latestError = e;
+    }
+    latestTried = true;
+    renderNow();
+  }
+
+  /* ---------- Drawing the page ---------- */
+  function renderNow() {
+    const stale = latest && Date.now() - latest.t > (CONFIG.minutesBetweenReadings * 2 + 10) * MIN;
+    for (const m of MEASURES) {
+      const lim = limFor(m);
+      const v = latest ? latest[m.key] : null;
+      el("now-" + m.key).textContent = v === null ? "–" : num(v);
+      const out = v !== null && (v < lim.min || v > lim.max);
+      el("now-" + m.key).closest(".reading").classList.toggle("is-out", out);
+      let note = "Your limits: " + numLimit(lim.min) + "–" + limitText(lim.max, m.unit);
+      if (out) note = (v > lim.max ? "Above your upper limit of " : "Below your lower limit of ") + limitText(v > lim.max ? lim.max : lim.min, m.unit);
+      el("now-" + m.key + "-note").textContent = note;
+    }
+    let status;
+    if (latest) status = "Last reading " + whenText(latest.t) + " (" + ago(Date.now() - latest.t) + ").";
+    else if (latestError) status = "The latest reading could not be loaded.";
+    else if (latestTried) status = "There are no readings yet.";
+    else status = "Loading the latest reading…";
+    el("now-status").textContent = status;
+    renderNotices(stale);
+  }
+
+  let noticeKey = "";
+  function renderNotices(stale) {
+    const list = [];
+    const err = loadError || latestError;
+    if (err instanceof PrivateChannelError) {
+      list.push({ text: "This ThingSpeak channel is private, so the page cannot read it. Make it public on ThingSpeak in the Sharing tab, or add a Read API Key in the settings at the top of index.html." });
+    } else if (err) {
+      list.push({ text: "Readings could not be loaded from ThingSpeak. Check the internet connection, then try again.", retry: true });
+    }
+    if (latest && stale) {
+      list.push({ text: "No new reading since " + whenText(latest.t) + " (" + ago(Date.now() - latest.t) + "). Check that the lab PC is on, the program window is open and the Arduino is plugged in." });
+    }
+    if (latest) {
+      for (const m of MEASURES) {
+        const v = latest[m.key], lim = limFor(m);
+        if (v === null) continue;
+        const verb = stale ? " was " : " is ";
+        if (v > lim.max) list.push({ text: m.name + verb + withUnit(v, m.unit) + ", above your upper limit of " + limitText(lim.max, m.unit) + "." });
+        else if (v < lim.min) list.push({ text: m.name + verb + withUnit(v, m.unit) + ", below your lower limit of " + limitText(lim.min, m.unit) + "." });
+      }
+    }
+    const key = list.map((n) => n.text).join("|");
+    if (key === noticeKey) return;
+    noticeKey = key;
+    const box = el("notices");
+    box.textContent = "";
+    for (const n of list) {
+      const p = document.createElement("p");
+      p.className = "notice";
+      p.textContent = n.text;
+      if (n.retry) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "btn";
+        b.textContent = "Try again";
+        b.addEventListener("click", () => { loadLatest(); load(); });
+        p.appendChild(b);
+      }
+      box.appendChild(p);
+    }
+  }
+
+  function renderSummary() {
+    const s = el("summary");
+    if (!current) {
+      s.textContent = loadError ? "No readings to show." : "Loading readings…";
+      return;
+    }
+    const r = current.readings;
+    if (!r.length) {
+      s.textContent = "No readings in this period. Try a longer time range.";
+      return;
+    }
+    let text = count(r.length) + (r.length === 1 ? " reading" : " readings") + " in this period.";
+    const gaps = findGaps(r);
+    if (gaps.n === 0) text += " No gaps.";
+    else if (gaps.n === 1) text += " One gap of " + duration(gaps.longest.d) + ", from " + fmt.dayTime.format(gaps.longest.from) + ".";
+    else text += " " + gaps.n + " gaps, the longest " + duration(gaps.longest.d) + " from " + fmt.dayTime.format(gaps.longest.from) + ".";
+    if (r[0].t - current.from > DAY) text += " Readings start on " + fmt.day.format(r[0].t) + ".";
+    s.textContent = text;
+  }
+
+  function statItem(label, value, when, warn) {
+    const wrap = document.createElement("div");
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    if (warn) dd.className = "is-warn";
+    if (when) {
+      const span = document.createElement("span");
+      span.className = "when";
+      span.textContent = when;
+      dd.appendChild(span);
+    }
+    wrap.appendChild(dt);
+    wrap.appendChild(dd);
+    return wrap;
+  }
+  function renderStats(m) {
+    const box = el("stats-" + m.key);
+    box.textContent = "";
+    if (!current || !current.readings.length) return;
+    const st = summarize(current.readings, m, limFor(m));
+    if (!st.n) return;
+    box.appendChild(statItem("Lowest", withUnit(st.low.v, m.unit), fmt.dayTime.format(st.low.t)));
+    box.appendChild(statItem("Highest", withUnit(st.high.v, m.unit), fmt.dayTime.format(st.high.t)));
+    box.appendChild(statItem("Average", withUnit(st.avg, m.unit)));
+    const pct = (100 * st.outside) / st.n;
+    const outside = st.outside === 0 ? "None" :
+      count(st.outside) + (st.outside === 1 ? " reading" : " readings") + " (" + (pct < 0.1 ? "under 0.1" : num(pct)) + "\u00A0%)";
+    box.appendChild(statItem("Outside your limits", outside, null, st.outside > 0));
+  }
+
+  function renderData() {
+    renderSummary();
+    updateDownloadButtons();
+    if (!current) {
+      for (const m of MEASURES) {
+        el("stats-" + m.key).textContent = "";
+        const chart = charts[m.key];
+        if (chart) {
+          for (const d of chart.data.datasets) d.data = [];
+          chart.$limits = null;
+          chart.update("none");
+        }
+        el("empty-" + m.key).hidden = false;
+      }
+      return;
+    }
+    currentStep = current.step;
+    for (const m of MEASURES) {
+      renderStats(m);
+      drawChart(m, current.bins, current.from, current.to, current.step);
+    }
+  }
+
+  /* ---------- Controls ---------- */
+  function buildControls() {
+    const box = el("range-buttons");
+    for (const r of RANGES) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = r.label;
+      b.dataset.range = r.id;
+      b.addEventListener("click", () => chooseRange(r.id));
+      box.appendChild(b);
+    }
+    el("step").addEventListener("change", (e) => chooseStep(parseInt(e.target.value, 10)));
+    el("custom-from").addEventListener("change", chooseDates);
+    el("custom-to").addEventListener("change", chooseDates);
+    el("dl-xlsx").addEventListener("click", downloadExcel);
+    el("dl-csv").addEventListener("click", downloadCsv);
+    el("copy-link").addEventListener("click", copyLink);
+    for (const k of ["tempMin", "tempMax", "humMin", "humMax"]) {
+      el("lim-" + k).addEventListener("input", limitsChanged);
+    }
+    el("lim-reset").addEventListener("click", () => {
+      limits = Object.assign({}, CONFIG.defaultLimits);
+      store.set(LIMITS_KEY, JSON.stringify(limits));
+      fillLimitInputs();
+      el("limits-error").hidden = true;
+      limitsApplied();
+    });
+  }
+
+  function updateControls() {
+    for (const b of el("range-buttons").children) {
+      b.setAttribute("aria-pressed", b.dataset.range === state.range ? "true" : "false");
+    }
+    const custom = state.range === "custom";
+    el("custom-dates").hidden = !custom;
+    if (custom) {
+      el("custom-from").value = state.from;
+      el("custom-to").value = state.to;
+      el("custom-to").max = isoDate(Date.now());
+      el("custom-from").max = isoDate(Date.now());
+    }
+    const w = currentWindow();
+    const select = el("step");
+    select.textContent = "";
+    for (const s of STEPS) {
+      const o = document.createElement("option");
+      o.value = String(s.min);
+      const tooMany = w && s !== STEPS[STEPS.length - 1] && pointsFor(w, s.min) > MAX_POINTS;
+      o.textContent = tooMany ? s.label + " (too many points)" : s.label;
+      o.disabled = !!tooMany;
+      if (s.min === state.step) o.selected = true;
+      select.appendChild(o);
+    }
+  }
+
+  function chooseRange(id) {
+    if (id === "custom" && state.range !== "custom") {
+      const w = currentWindow() || { from: Date.now() - 14 * DAY, to: Date.now() };
+      state.from = isoDate(w.from);
+      state.to = isoDate(w.to);
+    }
+    state.range = id;
+    const w = currentWindow();
+    state.step = w ? defaultStep(w) : 60;
+    say("");
+    updateControls();
+    saveView();
+    load();
+  }
+  function chooseDates() {
+    const f = el("custom-from").value, t = el("custom-to").value;
+    if (!isIsoDate(f) || !isIsoDate(t)) return;
+    if (f > t) { say("The start date must be on or before the end date."); return; }
+    say("");
+    state.from = f;
+    state.to = t;
+    const w = currentWindow();
+    if (!w) { say("The chosen dates are in the future. Choose an earlier date."); return; }
+    state.step = defaultStep(w);
+    updateControls();
+    saveView();
+    load();
+  }
+  function chooseStep(stepMin) {
+    state.step = stepMin;
+    saveView();
+    if (current) {
+      current.step = stepMin;
+      current.bins = makeBins(current.readings, current.from, current.to, stepMin);
+      renderData();
+    }
+  }
+
+  function fillLimitInputs() {
+    for (const k of ["tempMin", "tempMax", "humMin", "humMax"]) el("lim-" + k).value = String(limits[k]);
+  }
+  function limitsChanged() {
+    const l = {};
+    for (const k of ["tempMin", "tempMax", "humMin", "humMax"]) l[k] = parseFloat(el("lim-" + k).value);
+    const err = el("limits-error");
+    if (!["tempMin", "tempMax", "humMin", "humMax"].every((k) => isFinite(l[k]))) {
+      err.textContent = "Fill in all four limits as numbers.";
+      err.hidden = false;
+      return;
+    }
+    if (l.tempMin >= l.tempMax || l.humMin >= l.humMax) {
+      err.textContent = "Each lowest limit must be below its highest limit.";
+      err.hidden = false;
+      return;
+    }
+    if (!validLimits(l)) {
+      err.textContent = "Humidity limits must be between 0 and 100 %, and temperature limits between −50 and 100 °C.";
+      err.hidden = false;
+      return;
+    }
+    err.hidden = true;
+    limits = l;
+    store.set(LIMITS_KEY, JSON.stringify(limits));
+    limitsApplied();
+  }
+  function limitsApplied() {
+    renderNow();
+    renderData();
+  }
+
+  let sayTimer = null;
+  function say(text) {
+    el("action-status").textContent = text;
+    clearTimeout(sayTimer);
+    if (text) sayTimer = setTimeout(() => { el("action-status").textContent = ""; }, 8000);
+  }
+
+  /* ---------- Downloads ---------- */
+  function fileBase() {
+    const step = STEPS.find((s) => s.min === current.step);
+    return "lab-climate_" + isoDate(current.from) + "_to_" + isoDate(current.to) + "_" + (step ? step.short : current.step + "min");
+  }
+  function round2(v) { return v === null ? null : Math.round(v * 100) / 100; }
+  function pointRows() {
+    const rows = [];
+    for (const b of current.bins) {
+      if (!b.n) continue;
+      rows.push([b.t, round2(b.temp.avg), b.temp.min, b.temp.max, round2(b.hum.avg), b.hum.min, b.hum.max, b.n]);
+    }
+    return rows;
+  }
+  function saveFile(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+  }
+  function buildCsv() {
+    const lines = ["period_start,period_start_utc,temperature_avg_C,temperature_min_C,temperature_max_C,humidity_avg_percent,humidity_min_percent,humidity_max_percent,readings"];
+    const cell = (v) => (v === null || v === undefined ? "" : String(v));
+    for (const r of pointRows()) {
+      lines.push([isoLocal(r[0]), new Date(r[0]).toISOString()].concat(r.slice(1).map(cell)).join(","));
+    }
+    return new Blob([lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  }
+  function downloadCsv() {
+    if (!current) return;
+    saveFile(buildCsv(), fileBase() + ".csv");
+    say("Downloaded the points shown on the charts as a CSV file.");
+  }
+  function buildExcel() {
+    const points = {
+      name: "Points",
+      header: ["Period start", "Temperature average (°C)", "Temperature lowest (°C)", "Temperature highest (°C)",
+        "Humidity average (%)", "Humidity lowest (%)", "Humidity highest (%)", "Readings"],
+      formats: ["date", "dec", "dec", "dec", "dec", "dec", "dec", "int"],
+      widths: [18, 14, 14, 14, 14, 14, 14, 10],
+      rows: pointRows()
+    };
+    const readings = {
+      name: "Every reading",
+      header: ["Time", "Temperature (°C)", "Humidity (%)"],
+      formats: ["date", "dec", "dec"],
+      widths: [18, 16, 14],
+      rows: current.readings.map((r) => [r.t, r.temp, r.hum])
+    };
+    return makeXlsx([points, readings]);
+  }
+  function downloadExcel() {
+    if (!current) return;
+    saveFile(buildExcel(), fileBase() + ".xlsx");
+    say("Downloaded an Excel file with two sheets: the points shown on the charts, and every reading.");
+  }
+
+  /* A small Excel (.xlsx) writer, so no extra library is needed */
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+  function zipFiles(files) {
+    const enc = new TextEncoder();
+    const parts = [], central = [];
+    let offset = 0;
+    for (const f of files) {
+      const name = enc.encode(f.name), data = enc.encode(f.text), crc = crc32(data);
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true);
+      local.setUint16(4, 20, true);
+      local.setUint16(6, 0x0800, true);
+      local.setUint16(8, 0, true);
+      local.setUint16(10, 0, true);
+      local.setUint16(12, 33, true);
+      local.setUint32(14, crc, true);
+      local.setUint32(18, data.length, true);
+      local.setUint32(22, data.length, true);
+      local.setUint16(26, name.length, true);
+      local.setUint16(28, 0, true);
+      parts.push(new Uint8Array(local.buffer), name, data);
+      const cen = new DataView(new ArrayBuffer(46));
+      cen.setUint32(0, 0x02014b50, true);
+      cen.setUint16(4, 20, true);
+      cen.setUint16(6, 20, true);
+      cen.setUint16(8, 0x0800, true);
+      cen.setUint16(10, 0, true);
+      cen.setUint16(12, 0, true);
+      cen.setUint16(14, 33, true);
+      cen.setUint32(16, crc, true);
+      cen.setUint32(20, data.length, true);
+      cen.setUint32(24, data.length, true);
+      cen.setUint16(28, name.length, true);
+      cen.setUint16(30, 0, true);
+      cen.setUint16(32, 0, true);
+      cen.setUint16(34, 0, true);
+      cen.setUint16(36, 0, true);
+      cen.setUint32(38, 0, true);
+      cen.setUint32(42, offset, true);
+      central.push(new Uint8Array(cen.buffer), name);
+      offset += 30 + name.length + data.length;
+    }
+    let size = 0;
+    for (const c of central) size += c.length;
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(4, 0, true);
+    end.setUint16(6, 0, true);
+    end.setUint16(8, files.length, true);
+    end.setUint16(10, files.length, true);
+    end.setUint32(12, size, true);
+    end.setUint32(16, offset, true);
+    end.setUint16(20, 0, true);
+    return new Blob(parts.concat(central, [new Uint8Array(end.buffer)]),
+      { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  }
+  function xmlEscape(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function colName(i) {
+    let s = "";
+    for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+    return s;
+  }
+  function excelDate(ms) {
+    const d = new Date(ms);
+    const wall = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds());
+    return (wall - Date.UTC(1899, 11, 30)) / DAY;
+  }
+  function sheetXml(sheet) {
+    const style = { date: 2, dec: 3, int: 4 };
+    const out = [];
+    out.push('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
+    out.push('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">');
+    out.push('<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>');
+    out.push('<sheetFormatPr defaultRowHeight="15"/><cols>');
+    sheet.widths.forEach((w, i) => out.push('<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>'));
+    out.push("</cols><sheetData>");
+    out.push('<row r="1">' + sheet.header.map((h, c) =>
+      '<c r="' + colName(c) + '1" t="inlineStr" s="1"><is><t>' + xmlEscape(h) + "</t></is></c>").join("") + "</row>");
+    sheet.rows.forEach((row, ri) => {
+      const rn = ri + 2;
+      let cells = "";
+      row.forEach((v, c) => {
+        if (v === null || v === undefined || (typeof v === "number" && !isFinite(v))) return;
+        const f = sheet.formats[c];
+        const value = f === "date" ? excelDate(v) : v;
+        cells += '<c r="' + colName(c) + rn + '" s="' + style[f] + '"><v>' + value + "</v></c>";
+      });
+      out.push('<row r="' + rn + '">' + cells + "</row>");
+    });
+    out.push("</sheetData></worksheet>");
+    return out.join("");
+  }
+  function makeXlsx(sheets) {
+    const head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    const files = [];
+    files.push({
+      name: "[Content_Types].xml",
+      text: head + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        sheets.map((s, i) => '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join("") +
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+        "</Types>"
+    });
+    files.push({
+      name: "_rels/.rels",
+      text: head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+        "</Relationships>"
+    });
+    files.push({
+      name: "xl/workbook.xml",
+      text: head + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+        "<bookViews><workbookView/></bookViews><sheets>" +
+        sheets.map((s, i) => '<sheet name="' + xmlEscape(s.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>').join("") +
+        "</sheets></workbook>"
+    });
+    files.push({
+      name: "xl/_rels/workbook.xml.rels",
+      text: head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        sheets.map((s, i) => '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>').join("") +
+        '<Relationship Id="rId' + (sheets.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+        "</Relationships>"
+    });
+    files.push({
+      name: "xl/styles.xml",
+      text: head + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+        '<numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy-mm-dd hh:mm"/><numFmt numFmtId="165" formatCode="0.0"/></numFmts>' +
+        '<fonts count="2"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts>' +
+        '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+        '<cellXfs count="5">' +
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+        '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+        '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+        '<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+        '<xf numFmtId="1" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+        "</cellXfs>" +
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+        "</styleSheet>"
+    });
+    sheets.forEach((s, i) => files.push({ name: "xl/worksheets/sheet" + (i + 1) + ".xml", text: sheetXml(s) }));
+    return zipFiles(files);
+  }
+
+  /* ---------- Sharing a view ---------- */
+  function copyLink() {
+    const url = location.href;
+    const done = () => say("Link copied. Anyone who opens it sees this time range and point spacing.");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done, () => say("Copy this link: " + url));
+    } else {
+      say("Copy this link: " + url);
+    }
+  }
+
+  /* ---------- Start ---------- */
+  function start() {
+    document.title = CONFIG.title;
+    el("title").textContent = CONFIG.title;
+    el("subtitle").textContent = CONFIG.subtitle;
+    const src = el("foot-source");
+    src.textContent = "Readings come from ";
+    const a = document.createElement("a");
+    a.href = "https://thingspeak.com/channels/" + encodeURIComponent(CONFIG.channelId);
+    a.textContent = "ThingSpeak channel " + CONFIG.channelId;
+    src.appendChild(a);
+    src.appendChild(document.createTextNode(". The lab PC uploads a new reading every " + CONFIG.minutesBetweenReadings +
+      " minutes, and this page looks for new readings every 5 minutes while it is open."));
+
+    if (typeof Chart === "undefined") {
+      el("summary").textContent = "The chart library could not be loaded. Check the internet connection and reload the page.";
+      return;
+    }
+    Chart.defaults.font.family = FONT;
+
+    buildControls();
+    fillLimitInputs();
+    if (!readView(location.hash.replace(/^#/, ""))) {
+      if (!readView(store.get(VIEW_KEY))) state.range = RANGES.some((r) => r.id === CONFIG.defaultRange) ? CONFIG.defaultRange : "14d";
+    }
+    const w = currentWindow();
+    if (w) fixStep(w); else { state.range = "14d"; fixStep(currentWindow()); }
+    updateControls();
+    saveView();
+    for (const m of MEASURES) charts[m.key] = makeChart(m);
+
+    loadLatest();
+    load();
+
+    window.addEventListener("hashchange", () => {
+      if (readView(location.hash.replace(/^#/, ""))) {
+        fixStep(currentWindow() || { from: Date.now() - DAY, to: Date.now() });
+        updateControls();
+        saveView();
+        load();
+      }
+    });
+    const media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+    if (media && media.addEventListener) media.addEventListener("change", () => renderData());
+
+    function tick() {
+      if (document.hidden) return;
+      renderNow();
+      const now = Date.now();
+      if (now - lastLatestAt > 2 * MIN) loadLatest();
+      const endsNow = state.range !== "custom" || state.to >= isoDate(now);
+      if (endsNow && now - lastDataAt > 5 * MIN && !loading) load({ quiet: true });
+    }
+    setInterval(tick, 30 * 1000);
+    document.addEventListener("visibilitychange", tick);
+  }
+
+  window.labClimate = {
+    state: state,
+    get current() { return current; },
+    buildExcel: () => buildExcel(),
+    buildCsv: () => buildCsv(),
+    makeBins: makeBins,
+    refresh: () => load({ quiet: true })
+  };
+
+  start();
+})();
+</script>
+</body>
+</html>
