@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lab climate</title>
-<meta name="description" content="Temperature and humidity in the lab, measured every 15 minutes.">
+<meta name="description" content="Temperature and humidity in the lab.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f5faf7'/%3E%3Cpath d='M4 20 L10 14 L16 17 L22 9 L28 12' fill='none' stroke='%23c0262d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M4 26 L10 23 L16 25 L22 21 L28 22' fill='none' stroke='%233b3fa6' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -245,7 +245,7 @@
 <div class="page">
   <header>
     <h1 id="title">Lab climate</h1>
-    <p class="lede" id="subtitle">Temperature and humidity in the lab, measured every 15 minutes.</p>
+    <p class="lede" id="subtitle">Temperature and humidity in the lab.</p>
   </header>
 
   <section class="now" aria-labelledby="now-heading">
@@ -346,10 +346,13 @@ const CONFIG = {
   channelId: 3573817,          // your ThingSpeak channel number
   readApiKey: "",              // leave empty while the channel is public
   title: "Lab climate",
-  subtitle: "Temperature and humidity in the lab, measured every 15 minutes.",
+  subtitle: "Temperature and humidity in the lab.",
   temperatureField: 1,         // the ThingSpeak field that holds the temperature
   humidityField: 2,            // the ThingSpeak field that holds the humidity
-  minutesBetweenReadings: 15,  // how often the lab PC uploads a reading
+  minutesBetweenReadings: 15,  // how often the lab PC uploads a 15-minute average
+  liveChannelId: null,         // the number of your second channel ("Lab climate live"), for example 3581234
+  liveReadApiKey: "",          // leave empty while the live channel is public
+  liveEverySeconds: 20,        // how often the lab PC sends a live reading
   defaultRange: "14d",         // what visitors see first: 1d, 3d, 7d, 14d, 30d, 90d or 365d
   defaultLimits: { tempMin: 18, tempMax: 26, humMin: 30, humMax: 60 }
 };
@@ -393,6 +396,7 @@ const CONFIG = {
   /* ---------- Formatting ---------- */
   const fmt = {
     time: new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" }),
+    timeSec: new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     dayTime: new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }),
     day: new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }),
     dayShort: new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" })
@@ -412,6 +416,12 @@ const CONFIG = {
     const h = Math.round(ms / HOUR);
     if (h < 48) return h === 1 ? "1 hour ago" : h + " hours ago";
     return Math.round(ms / DAY) + " days ago";
+  }
+  function agoSeconds(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 5) return "just now";
+    if (s < 60) return s + " seconds ago";
+    return ago(ms);
   }
   function duration(ms) {
     const m = Math.round(ms / MIN);
@@ -525,11 +535,13 @@ const CONFIG = {
   /* ---------- Reading data from ThingSpeak ---------- */
   class PrivateChannelError extends Error {}
 
-  function feedsUrl(params) {
+  function feedsUrl(params, channelId, readKey) {
     const q = Object.keys(params).map((k) => k + "=" + encodeURIComponent(params[k]));
-    if (CONFIG.readApiKey) q.push("api_key=" + encodeURIComponent(CONFIG.readApiKey));
-    return API + "/channels/" + encodeURIComponent(CONFIG.channelId) + "/feeds.json?" + q.join("&");
+    const key = channelId ? readKey : CONFIG.readApiKey;
+    if (key) q.push("api_key=" + encodeURIComponent(key));
+    return API + "/channels/" + encodeURIComponent(channelId || CONFIG.channelId) + "/feeds.json?" + q.join("&");
   }
+  const LIVE_ON = !!CONFIG.liveChannelId && String(CONFIG.liveChannelId) !== String(CONFIG.channelId);
   async function getJson(url) {
     const res = await fetch(url, { cache: "no-store" });
     const text = await res.text();
@@ -929,6 +941,7 @@ const CONFIG = {
   /* ---------- Page state ---------- */
   let latest = null, latestError = null, loadError = null, current = null;
   let loadSeq = 0, loading = false, lastLatestAt = 0, lastDataAt = 0, latestTried = false;
+  let live = null, liveError = null, lastLiveAt = 0, liveTried = false, liveBusy = false, latestBusy = false;
 
   function setLoading(on, text) {
     loading = on;
@@ -974,6 +987,8 @@ const CONFIG = {
   }
 
   async function loadLatest() {
+    if (latestBusy) return;
+    latestBusy = true;
     lastLatestAt = Date.now();
     try {
       const data = await getJson(feedsUrl({ results: 1 }));
@@ -981,19 +996,55 @@ const CONFIG = {
       const r = feeds.length ? parseFeed(feeds[feeds.length - 1]) : null;
       if (r && (!latest || r.t >= latest.t)) latest = r;
       latestError = null;
+      // A new 15-minute average has arrived: add it to the charts straight away
+      const shownUntil = current && current.readings.length ? current.readings[current.readings.length - 1].t : 0;
+      const w = currentWindow();
+      if (r && current && r.t > shownUntil && w && w.to >= r.t && !loading) load({ quiet: true });
     } catch (e) {
       latestError = e;
+    } finally {
+      latestBusy = false;
     }
     latestTried = true;
     renderNow();
   }
 
+  async function loadLive() {
+    if (!LIVE_ON || liveBusy) return;
+    liveBusy = true;
+    lastLiveAt = Date.now();
+    try {
+      const data = await getJson(feedsUrl({ results: 1 }, CONFIG.liveChannelId, CONFIG.liveReadApiKey));
+      const feeds = data && Array.isArray(data.feeds) ? data.feeds : [];
+      const r = feeds.length ? parseFeed(feeds[feeds.length - 1]) : null;
+      if (r && (!live || r.t >= live.t)) live = r;
+      liveError = null;
+    } catch (e) {
+      liveError = e;
+    } finally {
+      liveBusy = false;
+    }
+    liveTried = true;
+    renderNow();
+  }
+
+  // The reading for the big numbers: the live one while it is fresh, otherwise the newest one there is
+  function liveFreshMs() { return Math.max(3 * MIN, CONFIG.liveEverySeconds * 4 * 1000); }
+  function shownReading() {
+    if (live && Date.now() - live.t < liveFreshMs()) return { r: live, isLive: true };
+    let r = latest;
+    if (live && (!r || live.t > r.t)) r = live;
+    return r ? { r: r, isLive: false } : null;
+  }
+
   /* ---------- Drawing the page ---------- */
   function renderNow() {
-    const stale = latest && Date.now() - latest.t > (CONFIG.minutesBetweenReadings * 2 + 10) * MIN;
+    const shown = shownReading();
+    const r = shown ? shown.r : null;
+    const stale = !!r && Date.now() - r.t > (CONFIG.minutesBetweenReadings * 2 + 10) * MIN;
     for (const m of MEASURES) {
       const lim = limFor(m);
-      const v = latest ? latest[m.key] : null;
+      const v = r ? r[m.key] : null;
       el("now-" + m.key).textContent = v === null ? "–" : num(v);
       const out = v !== null && (v < lim.min || v > lim.max);
       el("now-" + m.key).closest(".reading").classList.toggle("is-out", out);
@@ -1002,16 +1053,20 @@ const CONFIG = {
       el("now-" + m.key + "-note").textContent = note;
     }
     let status;
-    if (latest) status = "Last reading " + whenText(latest.t) + " (" + ago(Date.now() - latest.t) + ").";
-    else if (latestError) status = "The latest reading could not be loaded.";
+    if (shown && shown.isLive) {
+      status = "Live reading at " + fmt.timeSec.format(r.t) + " (" + agoSeconds(Date.now() - r.t) + "). The charts below show 15-minute averages.";
+    } else if (r) {
+      status = "Last reading " + whenText(r.t) + " (" + ago(Date.now() - r.t) + ").";
+      if (LIVE_ON && liveTried && !stale && !(liveError instanceof PrivateChannelError)) status += " Live readings are not arriving at the moment.";
+    } else if (latestError) status = "The latest reading could not be loaded.";
     else if (latestTried) status = "There are no readings yet.";
     else status = "Loading the latest reading…";
     el("now-status").textContent = status;
-    renderNotices(stale);
+    renderNotices(stale, r);
   }
 
   let noticeKey = "";
-  function renderNotices(stale) {
+  function renderNotices(stale, r) {
     const list = [];
     const err = loadError || latestError;
     if (err instanceof PrivateChannelError) {
@@ -1019,12 +1074,15 @@ const CONFIG = {
     } else if (err) {
       list.push({ text: "Readings could not be loaded from ThingSpeak. Check the internet connection, then try again.", retry: true });
     }
-    if (latest && stale) {
-      list.push({ text: "No new reading since " + whenText(latest.t) + " (" + ago(Date.now() - latest.t) + "). Check that the lab PC is on, the program window is open and the Arduino is plugged in." });
+    if (LIVE_ON && liveError instanceof PrivateChannelError) {
+      list.push({ text: "The live ThingSpeak channel is private, so the page cannot show live readings. Make it public on ThingSpeak in its Sharing tab." });
     }
-    if (latest) {
+    if (r && stale) {
+      list.push({ text: "No new reading since " + whenText(r.t) + " (" + ago(Date.now() - r.t) + "). Check that the lab PC is on, the program window is open and the Arduino is plugged in." });
+    }
+    if (r) {
       for (const m of MEASURES) {
-        const v = latest[m.key], lim = limFor(m);
+        const v = r[m.key], lim = limFor(m);
         if (v === null) continue;
         const verb = stale ? " was " : " is ";
         if (v > lim.max) list.push({ text: m.name + verb + withUnit(v, m.unit) + ", above your upper limit of " + limitText(lim.max, m.unit) + "." });
@@ -1504,8 +1562,9 @@ const CONFIG = {
     a.href = "https://thingspeak.com/channels/" + encodeURIComponent(CONFIG.channelId);
     a.textContent = "ThingSpeak channel " + CONFIG.channelId;
     src.appendChild(a);
-    src.appendChild(document.createTextNode(". The lab PC uploads a new reading every " + CONFIG.minutesBetweenReadings +
-      " minutes, and this page looks for new readings every 5 minutes while it is open."));
+    src.appendChild(document.createTextNode(". The sensor measures every 5 seconds. The lab PC uploads a " + CONFIG.minutesBetweenReadings +
+      "-minute average for the charts" + (LIVE_ON ? ", and a live reading every " + CONFIG.liveEverySeconds + " seconds for the numbers at the top" : "") +
+      ". This page shows new readings by itself while it is open."));
 
     if (typeof Chart === "undefined") {
       el("summary").textContent = "The chart library could not be loaded. Check the internet connection and reload the page.";
@@ -1525,6 +1584,7 @@ const CONFIG = {
     for (const m of MEASURES) charts[m.key] = makeChart(m);
 
     loadLatest();
+    loadLive();
     load();
 
     window.addEventListener("hashchange", () => {
@@ -1542,11 +1602,12 @@ const CONFIG = {
       if (document.hidden) return;
       renderNow();
       const now = Date.now();
-      if (now - lastLatestAt > 2 * MIN) loadLatest();
+      if (LIVE_ON && now - lastLiveAt >= Math.max(5, CONFIG.liveEverySeconds / 2) * 1000) loadLive();
+      if (now - lastLatestAt >= MIN) loadLatest();
       const endsNow = state.range !== "custom" || state.to >= isoDate(now);
       if (endsNow && now - lastDataAt > 5 * MIN && !loading) load({ quiet: true });
     }
-    setInterval(tick, 30 * 1000);
+    setInterval(tick, 5 * 1000);
     document.addEventListener("visibilitychange", tick);
   }
 
@@ -1556,7 +1617,8 @@ const CONFIG = {
     buildExcel: () => buildExcel(),
     buildCsv: () => buildCsv(),
     makeBins: makeBins,
-    refresh: () => load({ quiet: true })
+    refresh: () => load({ quiet: true }),
+    loadLive: () => loadLive()
   };
 
   start();
